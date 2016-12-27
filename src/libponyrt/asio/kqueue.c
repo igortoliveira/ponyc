@@ -151,16 +151,16 @@ void pony_asio_event_subscribe(asio_event_t* ev)
   struct kevent event[4];
   int i = 0;
 
-  // EV_CLEAR enforces edge triggered behaviour.
+  uint32_t flags = ev->flags & ASIO_ONESHOT ? EV_ONESHOT : EV_CLEAR;
   if(ev->flags & ASIO_READ)
   {
-    EV_SET(&event[i], ev->fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, ev);
+    EV_SET(&event[i], ev->fd, EVFILT_READ, EV_ADD | flags, 0, 0, ev);
     i++;
   }
 
   if(ev->flags & ASIO_WRITE)
   {
-    EV_SET(&event[i], ev->fd, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, 0, ev);
+    EV_SET(&event[i], ev->fd, EVFILT_WRITE, EV_ADD | flags, 0, 0, ev);
     i++;
   }
 
@@ -179,7 +179,7 @@ void pony_asio_event_subscribe(asio_event_t* ev)
   if(ev->flags & ASIO_SIGNAL)
   {
     signal((int)ev->nsec, SIG_IGN);
-    EV_SET(&event[i], ev->nsec, EVFILT_SIGNAL, EV_ADD | EV_CLEAR, 0, 0, ev);
+    EV_SET(&event[i], ev->nsec, EVFILT_SIGNAL, EV_ADD | flags, 0, 0, ev);
     i++;
   }
 
@@ -280,6 +280,41 @@ void pony_asio_event_unsubscribe(asio_event_t* ev)
   ponyint_messageq_push(&b->q, (pony_msg_t*)msg);
 
   retry_loop(b);
+}
+
+void pony_asio_event_resubscribe(asio_event_t* ev, uint32_t flags)
+{
+  if((ev == NULL) ||
+     (ev->magic != ev) ||
+     (ev->flags == ASIO_DISPOSABLE) ||
+     (ev->flags == ASIO_DESTROYED))
+  {
+    assert(0);
+    return;
+  }
+
+  asio_backend_t* b = ponyint_asio_get_backend();
+
+  struct kevent event[2];
+  int i = 0;
+
+  uint32_t kqueue_flags = ev->flags & ASIO_ONESHOT ? EV_ONESHOT : EV_CLEAR;
+  if(flags & ASIO_READ)
+  {
+    EV_SET(&event[i], ev->fd, EVFILT_READ, EV_ADD | kqueue_flags, 0, 0, ev);
+    i++;
+  }
+
+  if(flags & ASIO_WRITE)
+  {
+    EV_SET(&event[i], ev->fd, EVFILT_WRITE, EV_ADD | kqueue_flags, 0, 0, ev);
+    i++;
+  }
+
+  kevent(b->kq, event, i, NULL, 0, NULL);
+
+  if(ev->fd == STDIN_FILENO)
+    retry_loop(b);
 }
 
 #endif
